@@ -64,4 +64,4 @@ Trend-with-band, scatter + baseline, grouped bars, multi-line sweeps, heatmaps/c
 
 ## License
 
-MIT © Mark Marosi
+MIT
