@@ -1,0 +1,38 @@
+{
+  "name": "nice-figures",
+  "owner": {
+    "name": "Mark Marosi",
+    "email": "marosimark251@gmail.com"
+  },
+  "metadata": {
+    "description": "Soft-pastel, research-blog-style matplotlib figures for Claude Code.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "nice-figures",
+      "source": "./plugins/nice-figures",
+      "description": "Generate matplotlib figures in a soft-pastel, warm-earth, research-blog visual register — bold display titles, smoothed trends with shaded bands, rounded bars, minimal axes. Conference-ready white background by default.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Mark Marosi",
+        "email": "marosimark251@gmail.com"
+      },
+      "homepage": "https://github.com/Mapika/nice-figures",
+      "repository": "https://github.com/Mapika/nice-figures",
+      "license": "MIT",
+      "category": "data-visualization",
+      "keywords": [
+        "matplotlib",
+        "figures",
+        "charts",
+        "data-visualization",
+        "research",
+        "soft-pastel",
+        "conference",
+        "poster",
+        "plotting"
+      ]
+    }
+  ]
+}

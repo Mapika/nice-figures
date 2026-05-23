@@ -1,0 +1,23 @@
+{
+  "name": "nice-figures",
+  "version": "1.0.0",
+  "description": "Generate matplotlib figures in a soft-pastel, warm-earth, research-blog visual register — bold sans-serif display titles, scatter overlaid with smoothed trends and shaded confidence bands, signature rounded bars, minimal axes, and '↓better' badges. White background by default (conference-ready), with an opt-in warm cream blog background. Ships 16 chart archetypes and a dependency-light style helper.",
+  "author": {
+    "name": "Mark Marosi",
+    "email": "marosimark251@gmail.com"
+  },
+  "homepage": "https://github.com/Mapika/nice-figures",
+  "repository": "https://github.com/Mapika/nice-figures",
+  "license": "MIT",
+  "keywords": [
+    "matplotlib",
+    "figures",
+    "charts",
+    "data-visualization",
+    "research",
+    "soft-pastel",
+    "conference",
+    "poster",
+    "plotting"
+  ]
+}

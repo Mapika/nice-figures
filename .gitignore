@@ -1,0 +1,15 @@
+# skill-creator optimization workspace + original packaging artifacts
+_skill-workspace/
+_original_artifacts/
+extracted/
+
+# local Claude Code settings
+.claude/settings.local.json
+
+# python
+__pycache__/
+*.py[cod]
+
+# os cruft
+.DS_Store
+Thumbs.db
