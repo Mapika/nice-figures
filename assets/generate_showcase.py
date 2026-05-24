@@ -140,23 +140,29 @@ def fig_grouped_bars() -> None:
 # --------------------------------------------------------------------------
 def fig_scaling() -> None:
     np.random.seed(3)
+    # Pure power law L = C0 * C^(-alpha), with C0 pinned by a reference loss
+    # at C_ref. Exponents (~0.05-0.06) and the ~8-decade compute sweep match
+    # the Kaplan/Chinchilla regime: loss descends from ~5 nats toward the
+    # ~1.6-2 nat floor that frontier-scale models reach.
+    C_ref = 1e15
     families = {
-        "Dense": {"alpha": 0.085, "C0": 1.4e2, "color": LINE_PALETTE["blue"],
-                  "compute": np.array([1e16, 3e16, 1e17, 3e17, 1e18])},
-        "MoE": {"alpha": 0.095, "C0": 1.1e2, "color": LINE_PALETTE["pink"],
-                "compute": np.array([3e16, 1e17, 3e17, 1e18, 3e18])},
+        "Dense": {"alpha": 0.055, "L_ref": 5.5, "color": LINE_PALETTE["blue"],
+                  "compute": np.logspace(15, 22, 8)},
+        "MoE":   {"alpha": 0.060, "L_ref": 4.8, "color": LINE_PALETTE["pink"],
+                  "compute": np.logspace(15.5, 22.5, 8)},
     }
 
     fig, ax = plt.subplots(figsize=(8.5, 5.8))
     for name, d in families.items():
         c = d["color"]
-        loss = d["C0"] * d["compute"] ** (-d["alpha"])
-        loss_obs = loss * np.exp(np.random.normal(0, 0.03, len(loss)))
+        C0 = d["L_ref"] * C_ref ** d["alpha"]
+        loss = C0 * d["compute"] ** (-d["alpha"])
+        loss_obs = loss * np.exp(np.random.normal(0, 0.02, len(loss)))
         ax.scatter(d["compute"], loss_obs, color=c, s=45, zorder=3,
                    edgecolor="white", linewidth=0.8)
         cf = np.logspace(np.log10(d["compute"].min() * 0.7),
                          np.log10(d["compute"].max() * 1.5), 100)
-        ax.plot(cf, d["C0"] * cf ** (-d["alpha"]), color=c, linewidth=1.6,
+        ax.plot(cf, C0 * cf ** (-d["alpha"]), color=c, linewidth=1.6,
                 alpha=0.85,
                 label=fr"{name}: $L \propto C^{{-{d['alpha']:.3f}}}$")
 
