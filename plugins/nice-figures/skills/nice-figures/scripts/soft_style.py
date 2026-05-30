@@ -322,36 +322,42 @@ def save_figure(fig, name: str, formats=("pdf", "png"), dpi: int = 300):
 
 # ----------------------------------------------------------- rounded bars --
 
-def _rounded_bar_path(x_center: float, height: float, width: float,
-                      r_x: float, r_y: float):
-    """Build a Path for a single bar with square bottom + rounded top.
+def _rounded_top_path(ax, left: float, right: float, top: float,
+                      baseline: float, r_px: float):
+    """Path for one bar: square bottom at ``baseline``, rounded top at ``top``.
 
-    Independent x and y corner radii allow visually circular corners
-    regardless of the axis aspect ratio. Returns None for zero/negative
-    height (caller should skip).
+    ``r_px`` is the target corner radius in display pixels (capped to half the
+    bar's pixel width/height). Geometry is computed in DISPLAY pixels through the
+    axes transform, then mapped back to data coordinates. Because nothing is
+    anchored at ``y=0`` and no point is transformed at the origin, this is valid
+    on **log axes** as well as linear, and the corners stay circular regardless
+    of scale, aspect, or which subplot the axis is. Returns ``None`` for a
+    degenerate (zero-extent) bar so the caller can skip it.
     """
     from matplotlib.path import Path
 
-    if height <= 0:
+    trans = ax.transData
+    bl = trans.transform((left,  baseline))
+    br = trans.transform((right, baseline))
+    tl = trans.transform((left,  top))
+    tr = trans.transform((right, top))
+    w_pix = abs(br[0] - bl[0])
+    h_pix = abs(tl[1] - bl[1])
+    if w_pix <= 0 or h_pix <= 0:
         return None
 
-    left = x_center - width / 2
-    right = x_center + width / 2
-
-    # Cap radii so they don't exceed half the bar's dimensions
-    r_x = min(r_x, width / 2)
-    r_y = min(r_y, height / 2)
-
-    verts = [
-        (left,      0),              # MOVETO  start at bottom-left
-        (left,      height - r_y),   # LINETO  up the left side
-        (left,      height),         # CURVE3  control (corner)
-        (left + r_x, height),        # CURVE3  endpoint
-        (right - r_x, height),       # LINETO  across the top
-        (right,     height),         # CURVE3  control (corner)
-        (right,     height - r_y),   # CURVE3  endpoint
-        (right,     0),              # LINETO  down the right side
-        (0,         0),              # CLOSEPOLY (vertex ignored)
+    r = min(r_px, w_pix / 2.0, h_pix / 2.0)
+    sgn = 1.0 if tl[1] >= bl[1] else -1.0          # bar grows up (or down)
+    verts_px = [
+        (bl[0],     bl[1]),                # MOVETO  bottom-left
+        (tl[0],     tl[1] - sgn * r),      # LINETO  up the left side
+        (tl[0],     tl[1]),                # CURVE3  control (top-left corner)
+        (tl[0] + r, tl[1]),                # CURVE3  endpoint
+        (tr[0] - r, tr[1]),                # LINETO  across the top
+        (tr[0],     tr[1]),                # CURVE3  control (top-right corner)
+        (tr[0],     tr[1] - sgn * r),      # CURVE3  endpoint
+        (br[0],     br[1]),                # LINETO  down the right side
+        (0.0,       0.0),                  # CLOSEPOLY (vertex ignored)
     ]
     codes = [
         Path.MOVETO,
@@ -362,40 +368,49 @@ def _rounded_bar_path(x_center: float, height: float, width: float,
         Path.LINETO,
         Path.CLOSEPOLY,
     ]
-    return Path(verts, codes)
+    verts_data = trans.inverted().transform(verts_px)
+    return Path(verts_data, codes)
 
 
 def rounded_bars(ax, x, heights, width: float, color: str,
-                 radius_frac: float = 0.18, label=None,
-                 zorder: float = 2, **kwargs):
+                 radius_frac: float = 0.18, radius_pt: float | None = None,
+                 baseline=None, label=None, zorder: float = 2, **kwargs):
     """Draw bars with square bottoms and rounded top corners.
 
-    This is the visual signature of the Anthropic alignment-figure bar
-    charts — top corners softly rounded, bottom corners square on the
-    baseline. Drop-in replacement for ax.bar() for vertical bars sitting
-    on y=0.
+    The visual signature of the Anthropic alignment-figure bar charts — top
+    corners softly rounded, bottom corners square on the baseline. A drop-in
+    replacement for ``ax.bar()`` that works on **linear or log** y-axes and in
+    any subplot, because the rounded top is constructed in display pixels
+    through the axes transform rather than from a hard-coded ``y=0`` baseline.
 
-    The corner radius is computed in DISPLAY pixels and converted back
-    to data coordinates, so the corners look consistently circular
-    regardless of axis aspect ratio.
+    **Set ax.set_yscale / set_ylim / set_xlim BEFORE calling this** — the corner
+    geometry is read from the axes transform at call time. (Calling it after a
+    later relimit can stretch the corners.)
 
-    **Set ax.set_ylim() and ax.set_xlim() BEFORE calling rounded_bars()
-    for the most accurate corner geometry.** If you change limits
-    afterwards, the corners may look stretched.
-
-    For the legend, use ``matplotlib.patches.Patch(facecolor=..., label=...)``
-    since auto-legend handles from PathPatch don't look right.
+    For the legend, use ``matplotlib.patches.Patch(facecolor=..., label=...)``;
+    auto-legend handles from PathPatch don't look right.
 
     Args:
         ax: Target axis.
-        x: Array-like of bar center x-positions.
-        heights: Array-like of bar heights (assumes baseline at 0).
-        width: Bar width in data coordinates.
+        x: Bar center x-positions.
+        heights: Bar tops (absolute y-values, not deltas).
+        width: Bar width in x-data coordinates.
         color: Fill color.
-        radius_frac: Corner radius as a fraction of bar width.
-            0.15–0.22 matches the Anthropic look; 0.5 gives a fully
-            half-rounded top (pill cap).
-        label: Optional legend label (attached to first patch only).
+        radius_frac: Corner radius as a fraction of the bar's pixel width
+            (0.15–0.22 matches the house look; 0.5 gives a pill cap). Used only
+            when ``radius_pt`` is None.
+        radius_pt: Corner radius as an **absolute** size in points, overriding
+            ``radius_frac``. Prefer this when a figure mixes wide and narrow
+            bars (e.g. a single panel vs. grouped subplots): a fixed point
+            radius gives every bar in the figure set the *same* visual corner,
+            whereas ``radius_frac`` makes narrow bars look less rounded. Capped
+            to half the bar's pixel width/height.
+        baseline: Bottom of the bars. ``None`` → the axis's current lower
+            limit (``ax.get_ylim()[0]``), which is ``0`` on a linear-from-zero
+            axis and a safe positive value on a log axis. Pass a scalar to
+            anchor all bars, or an array (one per bar) to stack rounded tops
+            on top of existing segments.
+        label: Optional legend label (attached to the first patch only).
         zorder: Drawing order. Default 2 (behind error bars at zorder 3).
         **kwargs: Forwarded to PathPatch (e.g. alpha=0.8).
 
@@ -408,36 +423,26 @@ def rounded_bars(ax, x, heights, width: float, color: str,
     hs = np.atleast_1d(heights).astype(float)
     if len(xs) != len(hs):
         raise ValueError("x and heights must have the same length")
+    if baseline is None:
+        baseline = ax.get_ylim()[0]
+    bls = np.broadcast_to(np.asarray(baseline, dtype=float), hs.shape)
 
-    # Update data limits to include these bars so the transform reflects
-    # something close to the final figure layout. This is best-effort:
-    # if the user calls set_ylim() AFTER rounded_bars(), the corners
-    # will reflect the wrong limits and may look stretched.
-    pts = []
-    for xi, h in zip(xs, hs):
-        if h > 0:
-            pts.append((xi - width / 2, 0))
-            pts.append((xi + width / 2, h))
-    if pts:
-        ax.update_datalim(pts)
-        ax.autoscale_view()
-
-    # Compute corner radii so the corner is circular in display space.
-    r_x_data = radius_frac * width
-    p0 = ax.transData.transform((0, 0))
-    p1 = ax.transData.transform((r_x_data, 0))
-    r_pixels = abs(p1[0] - p0[0])
-
-    # Convert pixel radius back to y-data units
-    inv = ax.transData.inverted()
-    q0 = inv.transform((0, 0))
-    q1 = inv.transform((0, r_pixels))
-    r_y_data = abs(q1[1] - q0[1])
+    if radius_pt is not None:
+        r_px = radius_pt * ax.figure.dpi / 72.0          # absolute, width-independent
+    else:
+        # proportional: fraction of the (shared) bar pixel width
+        trans = ax.transData
+        x0 = float(xs[0])
+        wpx = abs(trans.transform((x0 + width / 2.0, bls[0]))[0]
+                  - trans.transform((x0 - width / 2.0, bls[0]))[0])
+        r_px = radius_frac * wpx
 
     patches = []
-    for i, (xi, h) in enumerate(zip(xs, hs)):
-        path = _rounded_bar_path(float(xi), float(h), width,
-                                  r_x_data, r_y_data)
+    for i, (xi, h, b) in enumerate(zip(xs, hs, bls)):
+        if h == b:
+            continue
+        path = _rounded_top_path(ax, xi - width / 2.0, xi + width / 2.0,
+                                 float(h), float(b), r_px)
         if path is None:
             continue
         lbl = label if (i == 0 and label is not None) else None
