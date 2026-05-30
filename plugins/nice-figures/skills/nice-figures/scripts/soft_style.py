@@ -323,15 +323,16 @@ def save_figure(fig, name: str, formats=("pdf", "png"), dpi: int = 300):
 # ----------------------------------------------------------- rounded bars --
 
 def _rounded_top_path(ax, left: float, right: float, top: float,
-                      baseline: float, radius_frac: float):
+                      baseline: float, r_px: float):
     """Path for one bar: square bottom at ``baseline``, rounded top at ``top``.
 
-    Geometry is computed in DISPLAY pixels through the axes transform, then
-    mapped back to data coordinates. Because nothing is anchored at ``y=0`` and
-    no point is transformed at the origin, this is valid on **log axes** as well
-    as linear, and the corners stay circular regardless of scale, aspect, or
-    which subplot the axis is. Returns ``None`` for a degenerate (zero-extent)
-    bar so the caller can skip it.
+    ``r_px`` is the target corner radius in display pixels (capped to half the
+    bar's pixel width/height). Geometry is computed in DISPLAY pixels through the
+    axes transform, then mapped back to data coordinates. Because nothing is
+    anchored at ``y=0`` and no point is transformed at the origin, this is valid
+    on **log axes** as well as linear, and the corners stay circular regardless
+    of scale, aspect, or which subplot the axis is. Returns ``None`` for a
+    degenerate (zero-extent) bar so the caller can skip it.
     """
     from matplotlib.path import Path
 
@@ -345,7 +346,7 @@ def _rounded_top_path(ax, left: float, right: float, top: float,
     if w_pix <= 0 or h_pix <= 0:
         return None
 
-    r = min(radius_frac * w_pix, w_pix / 2.0, h_pix / 2.0)
+    r = min(r_px, w_pix / 2.0, h_pix / 2.0)
     sgn = 1.0 if tl[1] >= bl[1] else -1.0          # bar grows up (or down)
     verts_px = [
         (bl[0],     bl[1]),                # MOVETO  bottom-left
@@ -372,8 +373,8 @@ def _rounded_top_path(ax, left: float, right: float, top: float,
 
 
 def rounded_bars(ax, x, heights, width: float, color: str,
-                 radius_frac: float = 0.18, baseline=None, label=None,
-                 zorder: float = 2, **kwargs):
+                 radius_frac: float = 0.18, radius_pt: float | None = None,
+                 baseline=None, label=None, zorder: float = 2, **kwargs):
     """Draw bars with square bottoms and rounded top corners.
 
     The visual signature of the Anthropic alignment-figure bar charts — top
@@ -396,7 +397,14 @@ def rounded_bars(ax, x, heights, width: float, color: str,
         width: Bar width in x-data coordinates.
         color: Fill color.
         radius_frac: Corner radius as a fraction of the bar's pixel width
-            (0.15–0.22 matches the house look; 0.5 gives a pill cap).
+            (0.15–0.22 matches the house look; 0.5 gives a pill cap). Used only
+            when ``radius_pt`` is None.
+        radius_pt: Corner radius as an **absolute** size in points, overriding
+            ``radius_frac``. Prefer this when a figure mixes wide and narrow
+            bars (e.g. a single panel vs. grouped subplots): a fixed point
+            radius gives every bar in the figure set the *same* visual corner,
+            whereas ``radius_frac`` makes narrow bars look less rounded. Capped
+            to half the bar's pixel width/height.
         baseline: Bottom of the bars. ``None`` → the axis's current lower
             limit (``ax.get_ylim()[0]``), which is ``0`` on a linear-from-zero
             axis and a safe positive value on a log axis. Pass a scalar to
@@ -419,12 +427,22 @@ def rounded_bars(ax, x, heights, width: float, color: str,
         baseline = ax.get_ylim()[0]
     bls = np.broadcast_to(np.asarray(baseline, dtype=float), hs.shape)
 
+    if radius_pt is not None:
+        r_px = radius_pt * ax.figure.dpi / 72.0          # absolute, width-independent
+    else:
+        # proportional: fraction of the (shared) bar pixel width
+        trans = ax.transData
+        x0 = float(xs[0])
+        wpx = abs(trans.transform((x0 + width / 2.0, bls[0]))[0]
+                  - trans.transform((x0 - width / 2.0, bls[0]))[0])
+        r_px = radius_frac * wpx
+
     patches = []
     for i, (xi, h, b) in enumerate(zip(xs, hs, bls)):
         if h == b:
             continue
         path = _rounded_top_path(ax, xi - width / 2.0, xi + width / 2.0,
-                                 float(h), float(b), radius_frac)
+                                 float(h), float(b), r_px)
         if path is None:
             continue
         lbl = label if (i == 0 and label is not None) else None
