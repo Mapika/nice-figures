@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Soft-pastel, research-blog-style matplotlib figures for Claude Code.",
-    "version": "1.0.1"
+    "version": "1.1.0"
   },
   "plugins": [
     {
       "name": "nice-figures",
       "source": "./plugins/nice-figures",
       "description": "Generate matplotlib figures in a soft-pastel, warm-earth, research-blog visual register — bold display titles, smoothed trends with shaded bands, rounded bars, minimal axes. Conference-ready white background by default.",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "author": {
         "name": "Mark Marosi",
         "email": "marosimark251@gmail.com"
@@ -31,7 +31,9 @@
         "soft-pastel",
         "conference",
         "poster",
-        "plotting"
+        "plotting",
+        "ai-agents",
+        "scientific-plots"
       ]
     }
   ]

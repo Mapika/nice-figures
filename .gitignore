@@ -9,6 +9,10 @@ extracted/
 # python
 __pycache__/
 *.py[cod]
+.venv/
+.pytest_cache/
+dist/
+*.egg-info/
 
 # os cruft
 .DS_Store

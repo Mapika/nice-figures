@@ -1,6 +1,6 @@
 {
   "name": "nice-figures",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Generate matplotlib figures in a soft-pastel, warm-earth, research-blog visual register — bold sans-serif display titles, scatter overlaid with smoothed trends and shaded confidence bands, signature rounded bars, minimal axes, and '↓better' badges. White background by default (conference-ready), with an opt-in warm cream blog background. Ships 16 chart archetypes and a dependency-light style helper.",
   "author": {
     "name": "Mark Marosi",
@@ -18,6 +18,8 @@
     "soft-pastel",
     "conference",
     "poster",
-    "plotting"
+    "plotting",
+    "ai-agents",
+    "scientific-plots"
   ]
 }

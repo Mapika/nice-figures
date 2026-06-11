@@ -24,6 +24,21 @@ white-background default is clean enough for most paper figures too.
 3. Plan: how many panels, what data, what colors, which "better" direction.
 4. Write the script using the recipe; adapt only what's necessary.
 5. Export both PDF and PNG via `save_figure()`.
+6. **Read the exported PNG and look at it.** This step is mandatory —
+   see "Inspect before delivering" below. Fix and re-render until clean.
+
+The register is designed around the Inter font. Check availability once
+per session — if it's missing, figures silently fall back to DejaVu Sans
+and look noticeably different:
+
+```python
+from matplotlib import font_manager
+has_inter = any(f.name == "Inter" for f in font_manager.fontManager.ttflist)
+```
+
+If absent, tell the user once (install via the OS package `fonts-inter`
+or from https://rsms.me/inter/, then delete matplotlib's font cache) and
+continue with the fallback — don't block on it.
 
 ## When to use this skill
 
@@ -60,7 +75,7 @@ register, smoothing bands, rounded bars.
 | 7 | ROC / PR curve | Classification diagnostics |
 | 8 | Distribution comparison (hist + KDE) | Property distributions, score shifts |
 | 9 | Box / violin plot | Seed stability, dataset comparison |
-| 10 | Scaling-law plot | Log-log scatter with power-law fit |
+| 10 | Scaling-law plot | Per-run loss curves + compute-efficient frontier (Kaplan/Chinchilla style) |
 | 11 | Parity / calibration plot | Predicted vs. actual, regression diagnostics |
 
 **Domain-specific (12–16):** embedding scatter, ECDFs, forest plots,
@@ -82,14 +97,46 @@ nearest one and adapt.
 ```python
 from soft_style import (
     configure_style, figure_title, panel_subtitle, better_badge,
+    top_legend, plain_log_ticks, soft_colorbar,
     smooth_curve, rolling_band, rounded_bars, rounded_hbars, save_figure,
-    LINE_PALETTE, BAR_PALETTE, MULTILINE_PALETTE,
-    CMAP_SEQUENTIAL, CMAP_DIVERGING,
+    LINE_PALETTE, BAR_PALETTE, MULTILINE_PALETTE, NEUTRAL,
+    CMAP_SEQUENTIAL, CMAP_DIVERGING, CMAP_GRADIENT,
 )
 
 configure_style()           # white background (default, conference-ready)
 # configure_style(cream_bg=True)  # original warm cream blog background
+# configure_style(scale=0.75)     # single-column paper figure (see below)
 ```
+
+Small layout helpers — prefer these over hand-rolled equivalents:
+
+- `top_legend(ax_or_fig, handles, ncols=...)` — horizontal frameless
+  legend above the plotting area; pass a Figure for one shared legend
+  over multiple panels. Raise the title to clear it (`y≈1.06` single
+  axes, `y≈1.14–1.18` figure-level).
+- `plain_log_ticks(ax, [2, 3, 4, 6, 9])` — plain-number labels on a log
+  axis that spans less than a decade (kills the `2×10⁰` clutter).
+- `soft_colorbar(fig, ax, im, label=...)` or
+  `soft_colorbar(fig, ax, norm=..., cmap=..., label=...)` — colorbar in
+  the soft register (gray label/ticks, thin outline).
+- `NEUTRAL["ink"]` — the dark near-black for error bars and emphasis/fit
+  lines; never hardcode hex for these.
+
+### Paper-column figures
+
+The recipes' defaults (~10-inch widths, 18 pt titles) suit slides,
+posters, and blogs. For a print-journal column, pass a scale factor and
+shrink the canvas together:
+
+```python
+configure_style(scale=0.75)              # fonts, lines, markers, pads
+fig, ax = plt.subplots(figsize=(3.5, 2.4))   # single column (~3.5 in)
+```
+
+Use `scale=0.75` for single-column, `scale=0.85` for 5–7 inch
+double-column or half-page figures. `figure_title()`, `panel_subtitle()`
+and `better_badge()` follow the scale automatically. PDFs embed TrueType
+(Type 42) fonts, so output passes IEEE/ACM/NeurIPS font checkers as-is.
 
 ### Palettes
 
@@ -107,6 +154,19 @@ configure_style()           # white background (default, conference-ready)
 - `CMAP_DIVERGING` — blue → cream → coral. Use for centered data with
   symmetric `vmin`/`vmax`: correlation matrices, log-fold-change,
   signed deviations from a baseline.
+- `CMAP_GRADIENT` — blue → sage → mustard → coral. For MANY series with
+  a natural order (model size, temperature, checkpoint): color each line
+  with `CMAP_GRADIENT(norm(value))` and add a colorbar instead of a
+  legend. The per-run scaling-law plot (recipe 10) is the canonical use.
+
+**Color-vision deficiency.** The palettes are the brand and stay as they
+are, but coral/sage and mustard/sage pairs blur under deuteranopia. The
+rule: never let color be the *only* channel separating series. With 1–2
+series color alone is fine; beyond that, differentiate redundantly —
+distinct markers (`o`, `s`, `^`, `D`) on line plots, position/order on
+bar charts (which already disambiguates), direct labels or annotations
+when lines stay separated. Ordered series on `CMAP_GRADIENT` are safe:
+the gradient is monotonic in lightness, so order survives any CVD.
 
 ### Typography
 
@@ -256,6 +316,16 @@ Use it when:
    Always use `rounded_bars()` for bar charts.
 8. **Setting `ylim` after `rounded_bars()`.** Corner radii are computed
    at call time using current axis limits. Always set limits first.
+9. **Legend sitting on top of data.** `loc="upper right"` collides with
+   tall bars or rising curves more often than not. When any corner is
+   occupied, use `top_legend(ax, handles)` to put the legend above the
+   axes (and bump the `figure_title` y to clear it). For multi-panel
+   figures, one shared `top_legend(fig, handles)` between the title and
+   the panels beats repeating a legend per panel. Always render the
+   figure and look at it before delivering.
+10. **A legend with 6+ entries for ordered series.** If many lines differ
+   only by a scalar (model size, temperature, step), color them with
+   `CMAP_GRADIENT` and add a colorbar — not a wall of legend entries.
 
 ## Export
 
@@ -271,7 +341,25 @@ For very large figures or print-quality posters:
 save_figure(fig, "poster_fig", formats=("pdf", "png"), dpi=600)
 ```
 
-## Checklist before delivering
+## Inspect before delivering (mandatory)
+
+After `save_figure()`, **Read the exported PNG and actually look at it**.
+Code that runs without errors still produces broken figures; every one
+of these failure modes has shipped from a script that "worked":
+
+- Legend sitting on top of bars, curves, or error bars → use
+  `top_legend()` or move it to an empty corner
+- A multi-series plot with no legend or colorbar — unlabeled series are
+  the most common miss because the author knows what the colors mean
+- Bars or markers clipped by axis limits, or hidden behind the legend
+- Overlapping/colliding tick labels, especially rotated x-labels
+- `2×10⁰`-style log labels where plain numbers were intended
+- Title overlapping a top legend (raise `figure_title` y)
+- Wrong font silently substituted (squint at the title weight)
+
+Fix, re-render, and look again — repeat until clean. Only then deliver.
+
+Code-level checklist (verify in the script, not the image):
 
 - [ ] `configure_style()` called *before* any plotting
 - [ ] Title applied via `figure_title()` (bold, large, sentence case)

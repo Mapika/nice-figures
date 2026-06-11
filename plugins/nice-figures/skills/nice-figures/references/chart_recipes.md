@@ -21,7 +21,7 @@ to your data and adapt.
 7. [ROC / PR curves](#7-roc--pr-curves)
 8. [Distribution comparison (histograms + KDE)](#8-distribution-comparison-histograms--kde)
 9. [Box / violin plot with overlaid points](#9-box--violin-plot-with-overlaid-points)
-10. [Scaling-law plot (log-log + power-law fit)](#10-scaling-law-plot-log-log--power-law-fit)
+10. [Scaling-law plot (per-run curves + compute-efficient frontier)](#10-scaling-law-plot-per-run-curves--compute-efficient-frontier)
 11. [Parity / calibration plot](#11-parity--calibration-plot)
 
 **Domain-specific archetypes (12–16):**
@@ -39,9 +39,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from soft_style import (
     configure_style, figure_title, panel_subtitle, better_badge,
-    smooth_curve, rolling_band, rounded_bars, save_figure,
+    top_legend, plain_log_ticks, soft_colorbar,
+    smooth_curve, rolling_band, rounded_bars, rounded_hbars, save_figure,
     LINE_PALETTE, BAR_PALETTE, MULTILINE_PALETTE,
-    CMAP_SEQUENTIAL, CMAP_DIVERGING, NEUTRAL,
+    CMAP_SEQUENTIAL, CMAP_DIVERGING, CMAP_GRADIENT, NEUTRAL,
 )
 
 configure_style()  # white background by default
@@ -162,7 +163,7 @@ fig, ax = plt.subplots(figsize=(10, 5.5))
 
 # Baseline dashed line + shaded tolerance band
 ax.axhspan(baseline - baseline_band, baseline + baseline_band,
-           color=NEUTRAL_LABEL_COLOR := "#D8D5CC", alpha=0.5, zorder=1)
+           color=NEUTRAL["band"], alpha=0.5, zorder=1)
 ax.axhline(baseline, linestyle="--", color="#6B6960",
            linewidth=1.2, zorder=2)
 
@@ -248,13 +249,15 @@ for i, (mean_row, err_row, col, lab) in enumerate(
     rounded_bars(ax, x + offset, mean_row, width=width, color=col,
                  radius_frac=0.22, label=lab)
     ax.errorbar(x + offset, mean_row, yerr=err_row, fmt="none",
-                ecolor="#3a3a37", elinewidth=1.1, capsize=3,
+                ecolor=NEUTRAL["ink"], elinewidth=1.1, capsize=3,
                 capthick=1.0, zorder=3)
 
 ax.set_xticks(x)
 ax.set_xticklabels(categories)
 ax.set_ylabel("Mean score")
-# PathPatch auto-legend handles don't look right — use Patch instead
+# PathPatch auto-legend handles don't look right — use Patch instead.
+# An in-axes corner works HERE because the tallest bar is far from it;
+# if any bar reaches the legend corner, switch to top_legend(ax, handles).
 handles = [Patch(facecolor=c, label=l) for c, l in zip(colors, models)]
 ax.legend(handles=handles, loc="upper right")
 
@@ -313,18 +316,62 @@ for i, (col, lab) in enumerate(zip(colors, conditions)):
     rounded_bars(ax, x + offset, means[:, i], width=width, color=col,
                  radius_frac=0.20, label=lab)
     ax.errorbar(x + offset, means[:, i], yerr=errs[:, i], fmt="none",
-                ecolor="#3a3a37", elinewidth=1.1, capsize=3,
+                ecolor=NEUTRAL["ink"], elinewidth=1.1, capsize=3,
                 capthick=1.0, zorder=3)
 
 ax.set_xticks(x)
 ax.set_xticklabels(scenarios)
 ax.set_ylabel("Misalignment score (lower=better)")
+# Tall bars occupy both upper corners → legend goes above the axes
 handles = [Patch(facecolor=c, label=l) for c, l in zip(colors, conditions)]
-ax.legend(handles=handles, loc="upper right")
+top_legend(ax, handles)
 
-figure_title(fig, "Agentic misalignment evals", y=1.00)
+figure_title(fig, "Agentic misalignment evals", y=1.06)
 save_figure(fig, "fig_agentic_misalignment")
 ```
+
+**Variant: stacked rounded bars.** Lower segments are plain rectangles;
+only the topmost segment gets the rounded corners, anchored on the
+cumulative height via `baseline=`. Heights passed to `rounded_bars()`
+are absolute tops, not deltas:
+
+```python
+from matplotlib.patches import Patch
+
+scenarios = ["Blackmail", "Financial crimes", "Cancer research"]
+parts = [  # bottom-to-top stacking order
+    ("Complied",          BAR_PALETTE["coral"], np.array([0.42, 0.30, 0.51])),
+    ("Partial / hedged",  BAR_PALETTE["peach"], np.array([0.21, 0.18, 0.14])),
+    ("Refused",           BAR_PALETTE["dark_gray"], np.array([0.10, 0.08, 0.07])),
+]
+
+fig, ax = plt.subplots(figsize=(9, 5.5))
+x = np.arange(len(scenarios))
+totals = sum(vals for _, _, vals in parts)
+ax.set_xlim(-0.5, len(scenarios) - 0.5)   # limits BEFORE rounded_bars
+ax.set_ylim(0, totals.max() * 1.15)
+
+bottom = np.zeros(len(scenarios))
+for i, (lab, col, vals) in enumerate(parts):
+    if i < len(parts) - 1:                # lower segments: square
+        ax.bar(x, vals, width=0.55, bottom=bottom, color=col,
+               edgecolor="none", zorder=2)
+    else:                                 # top segment: rounded corners
+        rounded_bars(ax, x, bottom + vals, width=0.55, color=col,
+                     baseline=bottom)
+    bottom += vals
+
+ax.set_xticks(x)
+ax.set_xticklabels(scenarios)
+ax.set_ylabel("Fraction of responses")
+handles = [Patch(facecolor=col, label=lab) for lab, col, _ in parts]
+top_legend(ax, handles)
+figure_title(fig, "Response breakdown by scenario", y=1.06)
+save_figure(fig, "fig_stacked_bars")
+```
+
+Keep stacks to ≤4 segments and order them largest-at-bottom; beyond
+that, a grouped chart or small multiples reads better.
 
 ---
 
@@ -382,9 +429,9 @@ Notes:
 
 **Spacing and figure size.** The Anthropic blog uses ~16:9 wide figures.
 For a conference paper with a single-column constraint (~3.5 inches),
-shrink with `figsize=(3.5, 2.1)` and reduce font sizes via a second
-`plt.rcParams.update()` call — but recognize that this register loses
-some of its character at column scale. The skill is best suited to
+use `configure_style(scale=0.75)` with `figsize=(3.5, 2.4)` (or
+`scale=0.85` for double-column width) — but recognize that this register
+loses some of its character at column scale. The skill is best suited to
 slide decks, posters, full-page paper figures, or appendices.
 
 **Color combinations to avoid.** Don't mix `LINE_PALETTE` and
@@ -451,11 +498,8 @@ for spine in ax.spines.values():
 ax.tick_params(length=0)
 
 # Colorbar with soft styling
-cbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.04)
-cbar.set_label("Row-normalized count", color=NEUTRAL["label"])
-cbar.outline.set_edgecolor(NEUTRAL["spine"])
-cbar.outline.set_linewidth(0.6)
-cbar.ax.tick_params(colors=NEUTRAL["tick"], length=2)
+soft_colorbar(fig, ax, im, label="Row-normalized count",
+              fraction=0.04, pad=0.04)
 
 figure_title(fig, "Functional-group classifier confusion matrix", y=1.02)
 save_figure(fig, "fig_heatmap")
@@ -627,54 +671,103 @@ Notes:
 
 ---
 
-## 10. Scaling-law plot (log-log + power-law fit)
+## 10. Scaling-law plot (per-run curves + compute-efficient frontier)
 
-Log-log axes, scatter for observed runs, fitted power-law line, slope
-exponent in the legend with LaTeX formatting.
+The iconic Kaplan/Chinchilla figure: one full loss-vs-compute training
+curve per model size — each run descends steeply, kisses the frontier
+near its compute-optimal point, then peels away into a diminishing-returns
+plateau. Runs are colored by parameter count on a log colorbar
+(`CMAP_GRADIENT`), and the dashed compute-efficient frontier is fit to
+the lower envelope of the family.
 
 ```python
-families = {
-    "Dense":     {"alpha": 0.085, "C0": 1.4e2, "color": LINE_PALETTE["blue"],
-                  "compute": np.array([1e16, 3e16, 1e17, 3e17, 1e18])},
-    "MoE":       {"alpha": 0.095, "C0": 1.1e2, "color": LINE_PALETTE["pink"],
-                  "compute": np.array([3e16, 1e17, 3e17, 1e18, 3e18])},
-}
+import matplotlib as mpl
 
-fig, ax = plt.subplots(figsize=(8.5, 5.8))
-for name, d in families.items():
-    c = d["color"]
-    loss = d["C0"] * d["compute"] ** (-d["alpha"])
-    loss_obs = loss * np.exp(np.random.normal(0, 0.03, len(loss)))
-    ax.scatter(d["compute"], loss_obs, color=c, s=45, zorder=3,
-               edgecolor="white", linewidth=0.8)
+# One training run per model size: arrays of (compute, loss).
+# Synthetic Kaplan-form placeholder, L(N, D) = (Nc/N)^aN + (Dc/D)^aD with
+# C = 6*N*D — with REAL data, replace this loop with each run's logged
+# (compute, loss) trace and keep everything below unchanged.
+Nc, aN, Dc, aD = 8.8e13, 0.076, 5.0e9, 0.30
+Ns = np.logspace(5, 11, 8)
+runs = []  # (N, C, L) per run
+for N in Ns:
+    plateau = (Nc / N) ** aN
+    D_star = Dc * ((aN / aD) * plateau) ** (-1 / aD)  # frontier tangency
+    D = D_star * np.logspace(-2.5, 1.8, 300)
+    C = 6.0 * N * D
+    L = plateau + (Dc / D) ** aD
+    runs.append((N, C, L * np.exp(np.random.normal(0, 0.004, len(L)))))
 
-    # Smooth fit line on a fine log-spaced grid
-    cf = np.logspace(np.log10(d["compute"].min() * 0.7),
-                     np.log10(d["compute"].max() * 1.5), 100)
-    ax.plot(cf, d["C0"] * cf ** (-d["alpha"]), color=c, linewidth=1.6,
-            alpha=0.85,
-            label=fr"{name}: $L \propto C^{{-{d['alpha']:.3f}}}$")
+norm = mpl.colors.LogNorm(Ns.min(), Ns.max())
+fig, ax = plt.subplots(figsize=(9, 5.8))
+for N, C, L in runs:
+    ax.plot(C, L, color=CMAP_GRADIENT(norm(N)), linewidth=1.2, alpha=0.95,
+            zorder=2)
+
+# Frontier = lower envelope of the family, fit as a line in log-log space.
+# Fit ONLY where an interior run is optimal: at the extremes the envelope
+# is biased high because no smaller/larger model exists there.
+C_dense = np.logspace(np.log10(min(C.min() for _, C, _ in runs)),
+                      np.log10(max(C.max() for _, C, _ in runs)), 600)
+losses = np.array([np.interp(C_dense, C, L, left=np.inf, right=np.inf)
+                   for _, C, L in runs])
+env, which = losses.min(axis=0), losses.argmin(axis=0)
+interior = (which > 0) & (which < len(runs) - 1)
+slope, icpt = np.polyfit(np.log10(C_dense[interior]),
+                         np.log10(env[interior]), 1)
+ax.plot(C_dense, 10**icpt * C_dense**slope, color=NEUTRAL["ink"],
+        linestyle="--", linewidth=1.4, zorder=3,
+        label=fr"Frontier: $L \propto C^{{{slope:.3f}}}$")
 
 ax.set_xscale("log")
 ax.set_yscale("log")
+# Loss spans <1 decade: plain numbers beat 2×10⁰-style log tick labels
+plain_log_ticks(ax, [2, 3, 4, 6, 9])
 ax.set_xlabel("Training compute (FLOPs)")
-ax.set_ylabel("Validation cross-entropy")
+ax.set_ylabel("Validation loss")
 ax.legend(loc="upper right")
 
-figure_title(fig, "Compute-loss scaling across architectures", y=1.00)
+soft_colorbar(fig, ax, norm=norm, cmap=CMAP_GRADIENT,
+              label="Model size (parameters)", pad=0.02)
+
+figure_title(fig, "Loss curves trace the compute-efficient frontier", y=1.00)
 save_figure(fig, "fig_scaling")
 ```
 
 Notes:
-- Fit the power law with `scipy.optimize.curve_fit` on `log(loss)` vs
-  `log(compute)` (linear in log-log space). For just visualization, a
-  pre-computed exponent is fine.
-- The `edgecolor="white"` on scatter markers separates them visually
-  from the fit line.
-- For Chinchilla-style optimal-frontier plots, overlay a `ax.plot(...)`
-  for the optimal envelope and `ax.fill_between` for the Pareto region.
-- Always plot on log-log axes for power laws — a straight line is the
-  reader's most important visual cue.
+- The synthetic `aD=0.30` is deliberately steeper than Kaplan's literal
+  ~0.095 — with the real exponents the per-run deviation from the
+  frontier is a few percent and the fan is invisibly tight. Real logged
+  runs have real curvature; this only matters for placeholder data.
+- ~7–9 runs is the sweet spot. More than ~10 and descending curves
+  tangle with neighbors' plateaus; fewer than ~6 reads as disconnected.
+- The interior-argmin mask on the envelope fit matters: the leftmost and
+  rightmost compute decades are "owned" by the smallest/largest run with
+  no competitor, so including them drags the fitted line off the true
+  frontier (it ends up cutting through the bundle).
+- A colorbar replaces the legend for the runs — never put 8 entries in a
+  legend box. Keep the legend for the frontier line only.
+- When the y-range spans less than a decade, matplotlib's `2×10⁰`-style
+  log labels waste ink: pick round numbers with `plain_log_ticks()`,
+  as above.
+- Always log-log for power laws — a straight line is the reader's most
+  important visual cue.
+
+**Variant: final-loss scatter + per-family power-law fits.** When you
+only have one terminal loss per run (no training traces), fall back to
+scatter + fitted lines, one color per family:
+
+```python
+ax.scatter(compute, loss_obs, color=c, s=45, zorder=3,
+           edgecolor="white", linewidth=0.8)
+cf = np.logspace(np.log10(compute.min() * 0.7),
+                 np.log10(compute.max() * 1.5), 100)
+ax.plot(cf, C0 * cf ** (-alpha), color=c, linewidth=1.6, alpha=0.85,
+        label=fr"Dense: $L \propto C^{{-{alpha:.3f}}}$")
+```
+
+Fit the exponent with `np.polyfit` on `log(loss)` vs `log(compute)`
+(linear in log-log space), one fit per family.
 
 ---
 
@@ -1025,6 +1118,7 @@ ax.set_ylabel("Validation accuracy")
 # encodes parameters here — that would make legend dots huge and
 # overlapping. Custom Line2D handles decouple "color encoding" in the
 # legend from "size encoding" in the plot.
+from matplotlib.lines import Line2D
 handles = [
     Line2D([0], [0], marker="o", color="w",
            markerfacecolor=family_colors[fam],

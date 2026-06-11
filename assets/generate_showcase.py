@@ -30,7 +30,8 @@ sys.path.insert(
 from soft_style import (  # noqa: E402
     configure_style, figure_title, panel_subtitle, better_badge,
     smooth_curve, rolling_band, rounded_bars, save_figure,
-    LINE_PALETTE, BAR_PALETTE, NEUTRAL,
+    top_legend, plain_log_ticks, soft_colorbar,
+    LINE_PALETTE, BAR_PALETTE, NEUTRAL, CMAP_GRADIENT,
 )
 
 configure_style()  # white background, conference-ready
@@ -53,6 +54,13 @@ def fig_training_curves() -> None:
         base = start * np.exp(-steps / decay)
         return base + np.random.normal(0, start * 0.15, len(steps))
 
+    # condition -> LINE_PALETTE color, in the canonical palette order
+    conditions = {
+        "Safety prompt + monitor": "blue",
+        "Safety system prompt": "mustard",
+        "Generic HHH prompt": "sage",
+        "No mitigation": "pink",
+    }
     panel_data = {
         "Blackmail": {
             "blue": make_series(0.04, 800), "mustard": make_series(0.10, 400),
@@ -85,7 +93,13 @@ def fig_training_curves() -> None:
     axes[0].set_ylabel("Rate of misaligned responses")
     fig.text(0.5, -0.02, "RL training steps", ha="center",
              color=NEUTRAL["label"], fontsize=11)
-    figure_title(fig, "Rate of alignment failures over RL steps", y=1.04)
+
+    # One shared legend for all panels, centered between title and subtitles
+    handles = [Line2D([0], [0], color=LINE_PALETTE[c], linewidth=2.0, label=l)
+               for l, c in conditions.items()]
+    top_legend(fig, handles)
+
+    figure_title(fig, "Rate of alignment failures over RL steps", y=1.16)
     png_only(fig, "showcase_training_curves")
     plt.close(fig)
 
@@ -122,56 +136,84 @@ def fig_grouped_bars() -> None:
         rounded_bars(ax, x + offset, means[:, i], width=width, color=col,
                      radius_frac=0.20, label=lab)
         ax.errorbar(x + offset, means[:, i], yerr=errs[:, i], fmt="none",
-                    ecolor="#3a3a37", elinewidth=1.1, capsize=3,
+                    ecolor=NEUTRAL["ink"], elinewidth=1.1, capsize=3,
                     capthick=1.0, zorder=3)
 
     ax.set_xticks(x)
     ax.set_xticklabels(scenarios)
     ax.set_ylabel("Misalignment score (lower=better)")
+    # Legend above the axes — inside "upper right" would sit on top of the
+    # tallest Cancer-research bar
     handles = [Patch(facecolor=c, label=l) for c, l in zip(colors, conditions)]
-    ax.legend(handles=handles, loc="upper right")
-    figure_title(fig, "Agentic misalignment evals", y=1.00)
+    top_legend(ax, handles)
+    figure_title(fig, "Agentic misalignment evals", y=1.06)
     png_only(fig, "showcase_grouped_bars")
     plt.close(fig)
 
 
 # --------------------------------------------------------------------------
-# 3. Scaling-law scatter, log-log + power-law fit (recipe 10)
+# 3. Scaling laws, Kaplan/Chinchilla-style: per-run loss curves whose lower
+#    envelope traces the compute-efficient frontier (recipe 10)
 # --------------------------------------------------------------------------
 def fig_scaling() -> None:
     np.random.seed(3)
-    # Pure power law L = C0 * C^(-alpha), with C0 pinned by a reference loss
-    # at C_ref. Exponents (~0.05-0.06) and the ~8-decade compute sweep match
-    # the Kaplan/Chinchilla regime: loss descends from ~5 nats toward the
-    # ~1.6-2 nat floor that frontier-scale models reach.
-    C_ref = 1e15
-    families = {
-        "Dense": {"alpha": 0.055, "L_ref": 5.5, "color": LINE_PALETTE["blue"],
-                  "compute": np.logspace(15, 22, 8)},
-        "MoE":   {"alpha": 0.060, "L_ref": 4.8, "color": LINE_PALETTE["pink"],
-                  "compute": np.logspace(15.5, 22.5, 8)},
-    }
+    import matplotlib as mpl
 
-    fig, ax = plt.subplots(figsize=(8.5, 5.8))
-    for name, d in families.items():
-        c = d["color"]
-        C0 = d["L_ref"] * C_ref ** d["alpha"]
-        loss = C0 * d["compute"] ** (-d["alpha"])
-        loss_obs = loss * np.exp(np.random.normal(0, 0.02, len(loss)))
-        ax.scatter(d["compute"], loss_obs, color=c, s=45, zorder=3,
-                   edgecolor="white", linewidth=0.8)
-        cf = np.logspace(np.log10(d["compute"].min() * 0.7),
-                         np.log10(d["compute"].max() * 1.5), 100)
-        ax.plot(cf, C0 * cf ** (-d["alpha"]), color=c, linewidth=1.6,
-                alpha=0.85,
-                label=fr"{name}: $L \propto C^{{-{d['alpha']:.3f}}}$")
+    # Kaplan-form loss: L(N, D) = (Nc/N)^aN + (Dc/D)^aD, with each run's
+    # compute C = 6*N*D. One curve per model size N; the lower envelope of
+    # the family is a pure power law in C — the compute-efficient frontier
+    # every run curve is tangent to. The data exponent aD is steepened vs.
+    # the literal Kaplan fit so each run shows a legible elbow + plateau
+    # (with the real ~0.095 the fan is invisibly tight).
+    Nc, aN, Dc, aD = 8.8e13, 0.076, 5.0e9, 0.30
+    Ns = np.logspace(5, 11, 8)                    # model sizes (params)
+    norm = mpl.colors.LogNorm(Ns.min(), Ns.max())
+
+    fig, ax = plt.subplots(figsize=(9, 5.8))
+    grids = []
+    for N in Ns:
+        # Tangency point of this run with the frontier (where d log L / d log D
+        # of the run matches the envelope), then sweep 2.5 decades to each
+        # side so the run visibly bends away at both ends.
+        plateau = (Nc / N) ** aN
+        D_star = Dc * ((aN / aD) * plateau) ** (-1.0 / aD)
+        D = D_star * np.logspace(-2.5, 1.8, 300)
+        C = 6.0 * N * D
+        L = plateau + (Dc / D) ** aD
+        # light multiplicative noise so curves read as real runs
+        L_obs = L * np.exp(np.random.normal(0, 0.004, len(L)))
+        ax.plot(C, L_obs, color=CMAP_GRADIENT(norm(N)), linewidth=1.2,
+                alpha=0.95, zorder=2)
+        grids.append((C, L))
+
+    # Compute-efficient frontier: lower envelope of the (noise-free) family.
+    # Fit only where an INTERIOR model is optimal — at the extremes the
+    # envelope is biased by the smallest/largest run having no neighbor.
+    C_dense = np.logspace(np.log10(min(c.min() for c, _ in grids)),
+                          np.log10(max(c.max() for c, _ in grids)), 600)
+    losses = np.array([np.interp(C_dense, c, l, left=np.inf, right=np.inf)
+                       for c, l in grids])
+    env, which = losses.min(axis=0), losses.argmin(axis=0)
+    interior = (which > 0) & (which < len(Ns) - 1)
+    slope, intercept = np.polyfit(np.log10(C_dense[interior]),
+                                  np.log10(env[interior]), 1)
+    ax.plot(C_dense, 10**intercept * C_dense**slope, color=NEUTRAL["ink"],
+            linestyle="--", linewidth=1.4, zorder=3,
+            label=fr"Frontier: $L \propto C^{{{slope:.3f}}}$")
 
     ax.set_xscale("log")
     ax.set_yscale("log")
+    # Loss spans <1 decade: plain numbers beat 2×10⁰-style log labels
+    plain_log_ticks(ax, [2, 3, 4, 6, 9])
     ax.set_xlabel("Training compute (FLOPs)")
-    ax.set_ylabel("Validation cross-entropy")
+    ax.set_ylabel("Validation loss")
     ax.legend(loc="upper right")
-    figure_title(fig, "Compute-loss scaling across architectures", y=1.00)
+
+    soft_colorbar(fig, ax, norm=norm, cmap=CMAP_GRADIENT,
+                  label="Model size (parameters)", pad=0.02)
+
+    figure_title(fig, "Loss curves trace the compute-efficient frontier",
+                 y=1.00)
     png_only(fig, "showcase_scaling")
     plt.close(fig)
 

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nice-figures"
+version = "1.1.0"
+description = "Soft-pastel research-figure style for matplotlib: rounded bars, smoothed trend bands, paper-ready typography. Built for AI agents, pleasant for humans."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Mark Marosi", email = "marosimark251@gmail.com" }]
+requires-python = ">=3.9"
+dependencies = ["matplotlib>=3.6", "numpy"]
+keywords = [
+    "matplotlib", "plotting", "figures", "data-visualization",
+    "research", "scientific-plots", "ai-agents", "claude-code",
+]
+classifiers = [
+    "Framework :: Matplotlib",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+
+[project.urls]
+Homepage = "https://github.com/Mapika/nice-figures"
+Repository = "https://github.com/Mapika/nice-figures"
+
+# The style helper lives inside the Claude Code plugin tree (the plugin is
+# the primary distribution); the wheel repackages that single module so
+# `pip install nice-figures` → `import soft_style` works everywhere else.
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.wheel.force-include]
+"plugins/nice-figures/skills/nice-figures/scripts/soft_style.py" = "soft_style.py"

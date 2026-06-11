@@ -9,11 +9,15 @@ Recreates the visual register used by AI alignment / research-blog figures:
   - "↓better" / "↑better" badges in the corner
 
 Public API:
-    configure_style(cream_bg=False)     — apply rcParams; defaults to white bg
+    configure_style(cream_bg=False, scale=1.0) — apply rcParams; white bg by
+        default; scale≈0.75 for single-column paper figures
     LINE_PALETTE, BAR_PALETTE, MULTILINE_PALETTE — dicts of named hex colors
     figure_title(fig, text)             — bold display title, sits above panels
     panel_subtitle(ax, text)            — light-gray subtitle above a single panel
     better_badge(ax, direction)         — ↓better / ↑better corner badge
+    top_legend(ax_or_fig, handles)      — horizontal frameless legend above axes
+    plain_log_ticks(ax, ticks)          — plain-number ticks on a log axis
+    soft_colorbar(fig, ax, ...)         — colorbar in the soft register
     smooth_curve(x, y, frac)            — Gaussian-kernel smoothed curve
     rolling_band(x, y, frac, k)         — smoothed mean ± k·σ for shaded bands
     save_figure(fig, name, formats)     — multi-format export, transparent-safe
@@ -66,6 +70,7 @@ NEUTRAL: dict[str, str] = {
     "tick":      "#8C8A82",
     "spine":     "#B8B5AC",
     "band":      "#D8D5CC",
+    "ink":       "#3a3a37",   # error bars, emphasis/fit lines
     "white":     "#FFFFFF",
     "cream_bg":  "#E8E5D7",   # original beige outer
     "cream_pnl": "#F4F1E6",   # original cream panel
@@ -88,22 +93,43 @@ def _build_cmaps():
          "#EBC5A8", "#D8704C", "#8C3520"],
         N=256,
     )
-    return sequential, diverging
+    # Ordered-series gradient: blue → sage → mustard → coral, all from the
+    # house palettes. Use when MANY series have a natural order (model size,
+    # temperature, checkpoint) — e.g. per-run loss curves in a scaling-law
+    # plot, colored by parameters, read off a log-scaled colorbar.
+    gradient = LinearSegmentedColormap.from_list(
+        "soft_gradient",
+        ["#6A9CC9", "#7AA890", "#D9A04E", "#D8704C"],
+        N=256,
+    )
+    return sequential, diverging, gradient
 
 
-CMAP_SEQUENTIAL, CMAP_DIVERGING = _build_cmaps()
+CMAP_SEQUENTIAL, CMAP_DIVERGING, CMAP_GRADIENT = _build_cmaps()
 
 
 # ---------------------------------------------------------------- styling --
 
-def configure_style(cream_bg: bool = False) -> None:
+# Set by configure_style(); read by figure_title / panel_subtitle /
+# better_badge so their hardcoded point sizes follow the scale.
+_SCALE: float = 1.0
+
+
+def configure_style(cream_bg: bool = False, scale: float = 1.0) -> None:
     """Apply the soft-research style globally via rcParams.
 
     Args:
         cream_bg: If True, use the warm cream/beige background of the
             original Anthropic blog figures. Default False (white background),
             which is what most academic conferences expect.
+        scale: Multiplier on all font sizes, line widths, marker sizes and
+            pads. 1.0 (default) suits slides/posters/blogs at the recipes'
+            ~10-inch figure widths. Use **0.75 with figsize≈(3.5, 2.4)** for
+            a single-column paper figure, ~0.85 for double-column width.
     """
+    global _SCALE
+    _SCALE = scale
+
     if cream_bg:
         outer_bg = NEUTRAL["cream_bg"]
         panel_bg = NEUTRAL["cream_pnl"]
@@ -118,26 +144,31 @@ def configure_style(cream_bg: bool = False) -> None:
         "savefig.facecolor":  outer_bg,
         "savefig.edgecolor":  "none",
 
+        # Embed TrueType (Type 42) fonts in PDF/PS — many venues (IEEE,
+        # ACM, NeurIPS checkers) reject matplotlib's default Type 3 fonts
+        "pdf.fonttype":        42,
+        "ps.fonttype":         42,
+
         # fonts — Inter/Helvetica/Arial preferred, DejaVu as fallback
         "font.family":         "sans-serif",
         "font.sans-serif":     ["Inter", "Helvetica Neue", "Helvetica",
                                 "Arial", "Liberation Sans", "DejaVu Sans"],
         "mathtext.fontset":    "dejavusans",  # math in sans, not serif default
-        "font.size":           11,
-        "axes.titlesize":      13,
+        "font.size":           11 * scale,
+        "axes.titlesize":      13 * scale,
         "axes.titleweight":    "normal",
         "axes.titlecolor":     NEUTRAL["label"],
-        "axes.titlepad":       12,
-        "axes.labelsize":      11,
+        "axes.titlepad":       12 * scale,
+        "axes.labelsize":      11 * scale,
         "axes.labelcolor":     NEUTRAL["label"],
         "axes.labelweight":    "normal",
-        "axes.labelpad":       8,
-        "xtick.labelsize":     9.5,
-        "ytick.labelsize":     9.5,
+        "axes.labelpad":       8 * scale,
+        "xtick.labelsize":     9.5 * scale,
+        "ytick.labelsize":     9.5 * scale,
         "xtick.color":         NEUTRAL["tick"],
         "ytick.color":         NEUTRAL["tick"],
-        "legend.fontsize":     9.5,
-        "figure.titlesize":    18,
+        "legend.fontsize":     9.5 * scale,
+        "figure.titlesize":    18 * scale,
         "figure.titleweight":  "bold",
 
         # spines: only bottom + left in soft gray
@@ -151,21 +182,21 @@ def configure_style(cream_bg: bool = False) -> None:
         # ticks: short, outward, light
         "xtick.major.width":   0.8,
         "ytick.major.width":   0.8,
-        "xtick.major.size":    3.0,
-        "ytick.major.size":    3.0,
+        "xtick.major.size":    3.0 * scale,
+        "ytick.major.size":    3.0 * scale,
         "xtick.minor.width":   0.5,
         "ytick.minor.width":   0.5,
         "xtick.direction":     "out",
         "ytick.direction":     "out",
-        "xtick.major.pad":     5,
-        "ytick.major.pad":     5,
+        "xtick.major.pad":     5 * scale,
+        "ytick.major.pad":     5 * scale,
 
         # no grid
         "axes.grid":           False,
 
         # lines & markers
-        "lines.linewidth":     2.0,
-        "lines.markersize":    4.0,
+        "lines.linewidth":     2.0 * scale,
+        "lines.markersize":    4.0 * scale,
         "lines.solid_capstyle": "round",
 
         # legend: thin gray rounded box, no shadow
@@ -192,7 +223,7 @@ def figure_title(fig, text: str, y: float | None = None) -> None:
             matplotlib choose, but you may want 0.97–1.02 depending on
             whether you've reserved space at the top.
     """
-    kwargs = dict(fontsize=18, fontweight="bold",
+    kwargs = dict(fontsize=18 * _SCALE, fontweight="bold",
                   color=NEUTRAL["title"], ha="center")
     if y is not None:
         kwargs["y"] = y
@@ -201,8 +232,8 @@ def figure_title(fig, text: str, y: float | None = None) -> None:
 
 def panel_subtitle(ax, text: str) -> None:
     """Light-gray subtitle above a single panel (e.g. 'Blackmail')."""
-    ax.set_title(text, color=NEUTRAL["label"], fontsize=12,
-                 fontweight="normal", pad=10)
+    ax.set_title(text, color=NEUTRAL["label"], fontsize=12 * _SCALE,
+                 fontweight="normal", pad=10 * _SCALE)
 
 
 def better_badge(ax, direction: str = "down",
@@ -225,7 +256,7 @@ def better_badge(ax, direction: str = "down",
     x, y, ha, va = positions[loc]
     ax.text(
         x, y, text, transform=ax.transAxes,
-        ha=ha, va=va, fontsize=9, color=NEUTRAL["label"],
+        ha=ha, va=va, fontsize=9 * _SCALE, color=NEUTRAL["label"],
         bbox=dict(
             boxstyle="round,pad=0.45,rounding_size=0.4",
             facecolor=NEUTRAL["white"],
@@ -233,6 +264,97 @@ def better_badge(ax, direction: str = "down",
             linewidth=0.7,
         ),
     )
+
+
+# ------------------------------------------- legends, ticks & colorbars --
+
+def top_legend(target, handles, ncols: int | None = None, **kwargs):
+    """Horizontal frameless legend above the plotting area.
+
+    The house fix for "the legend sits on top of the data": instead of an
+    in-axes corner box (which collides with tall bars or rising curves),
+    lay the entries in a row between the title and the panel(s).
+
+    Args:
+        target: An Axes (legend spans that panel) or a Figure (one shared
+            legend for all panels — preferred for multi-panel figures
+            instead of repeating a legend per panel).
+        handles: Explicit legend handles (``Patch`` / ``Line2D``).
+        ncols: Number of columns. Default: all entries in one row.
+        **kwargs: Forwarded to ``legend()`` (overrides the defaults).
+
+    Returns:
+        The Legend object.
+
+    Leave headroom for it when titling: pair with
+    ``figure_title(fig, ..., y=1.06)`` on a single axes, or y≈1.14–1.18
+    when the legend is figure-level above multiple panels.
+    """
+    from matplotlib.figure import FigureBase
+
+    n = ncols if ncols is not None else len(handles)
+    if isinstance(target, FigureBase):
+        opts = dict(loc="upper center", bbox_to_anchor=(0.5, 1.06),
+                    frameon=False, ncols=n, columnspacing=1.6,
+                    handlelength=1.6)
+    else:
+        opts = dict(loc="lower center", bbox_to_anchor=(0.5, 1.01),
+                    frameon=False, ncols=n, columnspacing=1.4)
+    opts.update(kwargs)
+    return target.legend(handles=handles, **opts)
+
+
+def plain_log_ticks(ax, ticks, axis: str = "y") -> None:
+    """Plain-number major ticks on a log-scaled axis.
+
+    When a log axis spans less than about a decade, matplotlib's
+    ``2 × 10⁰``-style labels waste ink. Pick round numbers (e.g.
+    ``[2, 3, 4, 6, 9]``) and label them plainly; minor labels are
+    suppressed.
+    """
+    from matplotlib.ticker import NullFormatter, ScalarFormatter
+
+    if axis == "y":
+        ax.set_yticks(ticks)
+        axis_obj = ax.yaxis
+    elif axis == "x":
+        ax.set_xticks(ticks)
+        axis_obj = ax.xaxis
+    else:
+        raise ValueError("axis must be 'x' or 'y'")
+    axis_obj.set_major_formatter(ScalarFormatter())
+    axis_obj.set_minor_formatter(NullFormatter())
+
+
+def soft_colorbar(fig, ax, mappable=None, *, norm=None, cmap=None,
+                  label: str | None = None, fraction: float = 0.05,
+                  pad: float = 0.03, **kwargs):
+    """Colorbar styled to the soft register (gray label, thin outline).
+
+    Two calling modes:
+      - ``soft_colorbar(fig, ax, im, label=...)`` with a mappable from
+        ``imshow``/``scatter``.
+      - ``soft_colorbar(fig, ax, norm=norm, cmap=CMAP_GRADIENT, label=...)``
+        when lines were colored manually (e.g. per-run scaling curves) and
+        no mappable exists.
+
+    Returns:
+        The Colorbar object.
+    """
+    import matplotlib as mpl
+
+    if mappable is None:
+        if norm is None or cmap is None:
+            raise ValueError("pass a mappable, or both norm= and cmap=")
+        mappable = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
+    cbar = fig.colorbar(mappable, ax=ax, fraction=fraction, pad=pad,
+                        **kwargs)
+    if label:
+        cbar.set_label(label, color=NEUTRAL["label"])
+    cbar.outline.set_edgecolor(NEUTRAL["spine"])
+    cbar.outline.set_linewidth(0.6)
+    cbar.ax.tick_params(colors=NEUTRAL["tick"], length=2)
+    return cbar
 
 
 # -------------------------------------------------------- smoothing utils --
@@ -357,7 +479,9 @@ def _rounded_top_path(ax, left: float, right: float, top: float,
         (tr[0],     tr[1]),                # CURVE3  control (top-right corner)
         (tr[0],     tr[1] - sgn * r),      # CURVE3  endpoint
         (br[0],     br[1]),                # LINETO  down the right side
-        (0.0,       0.0),                  # CLOSEPOLY (vertex ignored)
+        (bl[0],     bl[1]),                # CLOSEPOLY (vertex unused for
+                                           # drawing, but kept in-bounds so
+                                           # path extents stay correct)
     ]
     codes = [
         Path.MOVETO,
@@ -481,7 +605,9 @@ def _rounded_hbar_path(y_center: float, width: float, height: float,
         (width,       top),            # CURVE3  control (top-right)
         (width - r_x, top),            # CURVE3  endpoint
         (0,           top),            # LINETO  along the top
-        (0,           0),              # CLOSEPOLY (vertex ignored)
+        (0,           bottom),         # CLOSEPOLY (vertex unused for
+                                       # drawing; kept in-bounds so path
+                                       # extents stay correct)
     ]
     codes = [
         Path.MOVETO,
